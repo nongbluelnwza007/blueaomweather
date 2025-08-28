@@ -1,60 +1,134 @@
-function showLoading(on = true, msg = "กำลังดึงข้อมูล…") {
-  const ld = document.getElementById("loading");
-  const txt = document.getElementById("loadingText");
-  const ct = document.getElementById("content");
-  ld.style.display = on ? "flex" : "none";
-  if (txt) txt.textContent = " " + msg;
-  ct.style.display = on ? "none" : "block";
-}
+/* global Chart, L */
+const $ = (id) => document.getElementById(id);
+$("year").textContent = new Date().getFullYear();
 
-function render(doc) {
-  showLoading(false);
+let chart;
 
-  const loc = `${doc?.location?.name ?? "ตำแหน่งปัจจุบัน"}`;
-  const fetched = doc?.fetchedAt ? new Date(doc.fetchedAt).toLocaleString() : "-";
-  const temp = Math.round(doc?.current?.temperature_2m ?? 0);
-  const wind = doc?.current?.wind_speed_10m ?? "-";
-  const humi = doc?.current?.relative_humidity_2m ?? "-";
-  const coord = `${doc?.location?.lat}, ${doc?.location?.lon}`;
+async function loadWeather() {
+  try {
+    const loadingText = "กำลังดึงข้อมูล…";
+    $("loc").textContent = loadingText;
+    $("time").textContent = "";
+    $("coord").textContent = "";
 
-  document.getElementById("loc").textContent = loc;
-  document.getElementById("time").textContent = `อัปเดต: ${fetched}`;
-  document.getElementById("temp").textContent = `${temp}°C`;
-  document.getElementById("wind").textContent = wind;
-  document.getElementById("humi").textContent = humi;
-  document.getElementById("coord").textContent = coord;
-}
+    const resp = await fetch("/api/weather", { cache: "no-store" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const doc = await resp.json();
 
-async function fetchByIp() {
-  showLoading(true, "กำลังดึงข้อมูลจากตำแหน่ง IP ของคุณ…");
-  const r = await fetch("/api/weather/by-ip");
-  if (!r.ok) throw new Error("API error");
-  const j = await r.json();
-  render(j);
-}
-
-async function fetchLatest() {
-  showLoading(true, "กำลังอ่านข้อมูลล่าสุดจากฐานข้อมูล…");
-  const r = await fetch("/api/latest");
-  const j = await r.json();
-  showLoading(false);
-  if (!j) {
-    alert("ยังไม่มีข้อมูลในฐานข้อมูล ลองกด “ดูสภาพอากาศตอนนี้” ก่อนครับ");
-    return;
+    renderNow(doc);
+    renderDaily(doc);
+    renderChart(doc);
+    renderMap(doc);
+  } catch (e) {
+    console.error(e);
+    $("loc").textContent = "ดึงข้อมูลไม่สำเร็จ";
+    $("time").textContent = e.message || "unknown error";
   }
-  render(j);
 }
 
-document.getElementById("btnNow").addEventListener("click", () => {
-  fetchByIp().catch(err => {
-    showLoading(false);
-    alert("ดึงข้อมูลไม่สำเร็จ: " + err.message);
-  });
-});
+function renderNow(doc) {
+  const d = doc.current || {};
+  const loc = doc.location || {};
 
-document.getElementById("btnLatest").addEventListener("click", () => {
-  fetchLatest().catch(err => {
-    showLoading(false);
-    alert("อ่าน DB ไม่สำเร็จ: " + err.message);
+  $("loc").textContent = [
+    loc.city, loc.region, loc.country
+  ].filter(Boolean).join(", ") || "Unknown location";
+
+  $("time").textContent = new Date(doc.fetchedAt).toLocaleString();
+  $("coord").textContent = loc.lat && loc.lon ? `(${loc.lat.toFixed(4)}, ${loc.lon.toFixed(4)})` : "";
+
+  $("temp").textContent = (d.temperature_2m ?? "--") + "°C";
+  $("humi").textContent = d.relative_humidity_2m ?? "-";
+  $("wind").textContent = d.wind_speed_10m ?? "-";
+}
+
+function renderDaily(doc) {
+  const daysEl = $("days");
+  daysEl.innerHTML = "";
+
+  const daily = doc.daily || {};
+  if (!daily.time) return;
+
+  // Open-Meteo (past_days=5 + forecast_days=1) จะได้ 6 วัน (ย้อนหลัง 5 + วันนี้)
+  // เราจะแสดงเฉพาะ 5 วันย้อนหลัง (ตัดวันสุดท้ายออก)
+  const times = daily.time.slice(0, -1);
+  const tmax = daily.temperature_2m_max?.slice(0, -1) || [];
+  const tmin = daily.temperature_2m_min?.slice(0, -1) || [];
+  const prcp = daily.precipitation_sum?.slice(0, -1) || [];
+  const wmax = daily.wind_speed_10m_max?.slice(0, -1) || [];
+
+  times.forEach((iso, i) => {
+    const el = document.createElement("div");
+    el.className = "day";
+    el.innerHTML = `
+      <h4>${fmtDay(iso)}</h4>
+      <div class="temps">
+        <span class="max">${fmtNum(tmax[i])}°</span>
+        <span class="min">/${fmtNum(tmin[i])}°</span>
+      </div>
+      <div class="muted">💧 ฝนรวม: ${fmtNum(prcp[i])} mm</div>
+      <div class="muted">🌬️ ลมสูงสุด: ${fmtNum(wmax[i])} m/s</div>
+    `;
+    daysEl.appendChild(el);
   });
-});
+}
+
+function renderChart(doc) {
+  const daily = doc.daily || {};
+  if (!daily.time) return;
+
+  const labels = daily.time.slice(0, -1).map((iso) => fmtLabel(iso));
+  const tmax = daily.temperature_2m_max?.slice(0, -1) || [];
+  const tmin = daily.temperature_2m_min?.slice(0, -1) || [];
+
+  const ctx = document.getElementById("chart");
+  if (chart) chart.destroy();
+  chart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        { label: "อุณหภูมิสูงสุด (°C)", data: tmax, tension: .35 },
+        { label: "อุณหภูมิต่ำสุด (°C)", data: tmin, tension: .35 }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: "#e5e7eb" } }
+      },
+      scales: {
+        x: { ticks: { color: "#94a3b8" }, grid: { color: "#1f2937" } },
+        y: { ticks: { color: "#94a3b8" }, grid: { color: "#1f2937" } }
+      }
+    }
+  });
+}
+
+function renderMap(doc) {
+  const loc = doc.location || {};
+  const lat = loc.lat || 13.736;
+  const lon = loc.lon || 100.523;
+
+  const map = L.map("map", { zoomControl: true }).setView([lat, lon], 11);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap"
+  }).addTo(map);
+  L.marker([lat, lon]).addTo(map).bindPopup(`${loc.city || "ตำแหน่งของคุณ"}`);
+}
+
+function fmtNum(n) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "-";
+  return Math.round(Number(n));
+}
+function fmtDay(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("th-TH", { weekday: "short", day: "2-digit", month: "short" });
+}
+function fmtLabel(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("th-TH", { day: "2-digit", month: "short" });
+}
+
+document.addEventListener("DOMContentLoaded", loadWeather);

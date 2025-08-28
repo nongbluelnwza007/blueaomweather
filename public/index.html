@@ -1,117 +1,133 @@
 <!doctype html>
 <html lang="th">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>BlueAom Weather</title>
+
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+
+  <!-- Leaflet Map (ไม่ต้องใช้ API key) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-VuZ8H8b2QBrG8VfPqTQ8r0iX89H0oS0jG3Lr09r1w3s=" crossorigin=""></script>
+
+  <!-- Chart.js สำหรับกราฟย้อนหลัง -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
   <style>
     :root{
-      --bg:#0f172a;        /* slate-900 */
-      --card:#111827ee;    /* gray-900 with alpha */
-      --muted:#94a3b8;     /* slate-400 */
-      --accent:#60a5fa;    /* blue-400 */
-      --accent2:#22d3ee;   /* cyan-400 */
-      --ring:#1f2937;      /* gray-800 */
+      --bg:#0b1220; --panel:#0f172a; --ring:#1f2937;
+      --text:#e5e7eb; --muted:#94a3b8;
+      --accent:#60a5fa; --accent2:#22d3ee; --accent3:#a78bfa;
     }
     *{box-sizing:border-box}
     body{
-      margin:0; min-height:100vh; color:#e5e7eb;
+      margin:0; min-height:100vh; color:var(--text);
       font-family:Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: radial-gradient(1200px 600px at 20% -10%, #0ea5e9 0%, transparent 60%),
-                  radial-gradient(1000px 600px at 110% 10%, #6366f1 0%, transparent 60%),
-                  var(--bg);
-      display:flex; align-items:center; justify-content:center; padding:24px;
+      background:
+        radial-gradient(1200px 600px at 15% -10%, #0ea5e9 0%, transparent 60%),
+        radial-gradient(800px 500px at 110% 10%, #6366f1 0%, transparent 60%),
+        var(--bg);
+      display:flex; align-items:flex-start; justify-content:center; padding:28px;
     }
-    .shell{ width:100%; max-width:920px; }
-    .hero{ text-align:center; margin-bottom:24px; }
+    .container{ width:100%; max-width:1100px; display:grid; gap:20px; grid-template-columns: 1.2fr .8fr; }
+    .header{
+      grid-column: 1 / -1; text-align:center; margin-bottom:4px;
+    }
     .title{
-      font-weight:800; font-size:clamp(28px, 4vw, 42px); letter-spacing:.3px;
-      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      font-size:clamp(28px, 4vw, 44px); font-weight:800; letter-spacing:.2px; margin:0;
+      background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent3));
       -webkit-background-clip:text; background-clip:text; color:transparent;
-      text-shadow: 0 6px 30px rgba(59,130,246,.25);
+      text-shadow:0 8px 40px rgba(56,189,248,.35);
     }
-    .subtitle{ color:var(--muted); margin-top:8px }
+    .subtitle{ color:var(--muted); margin-top:6px }
+
     .card{
-      background: linear-gradient(180deg, rgba(17,24,39,.95), rgba(15,23,42,.92));
+      background: linear-gradient(180deg, rgba(17,24,39,.95), rgba(11,18,32,.92));
       border:1px solid var(--ring);
-      border-radius:24px; padding:24px; box-shadow: 0 20px 60px rgba(2,6,23,.6);
-      backdrop-filter: blur(6px);
+      border-radius:22px; padding:18px 18px 16px;
+      box-shadow: 0 20px 60px rgba(2,6,23,.6); backdrop-filter: blur(6px);
     }
-    .row{ display:flex; gap:16px; align-items:center; justify-content:center; flex-wrap:wrap }
-    .btn{
-      border:0; border-radius:14px; padding:12px 18px; font-weight:600; cursor:pointer;
-      background: linear-gradient(90deg, var(--accent), var(--accent2));
-      color:#0b1324; box-shadow:0 8px 30px rgba(56,189,248,.35);
-      transition: transform .08s ease, filter .2s ease;
-    }
-    .btn:active{ transform: translateY(1px) }
-    .btn.secondary{
-      background:transparent; color:#e5e7eb; border:1px solid var(--ring);
-      box-shadow:none;
-    }
-    .grid{ display:grid; grid-template-columns: repeat(3, minmax(120px,1fr)); gap:12px; margin-top:14px }
-    .pill{
-      background:#0b1220; border:1px solid var(--ring); border-radius:14px; padding:12px 14px;
-      display:flex; align-items:center; gap:8px; color:#d1d5db;
-    }
-    .big{ font-size:56px; font-weight:800; line-height:1 }
+    .row{ display:flex; gap:14px; align-items:center; justify-content:space-between; flex-wrap:wrap }
     .muted{ color:var(--muted) }
-    .right{ text-align:right }
-    .footer{ margin-top:14px; text-align:center; color:var(--muted); font-size:12px }
+    .big{ font-size:60px; font-weight:800; line-height:1 }
+    .pill{
+      background:#0b1220; border:1px solid var(--ring); border-radius:12px; padding:10px 12px;
+      display:inline-flex; gap:8px; align-items:center; color:#cbd5e1; font-size:14px;
+    }
     .badge{
-      display:inline-flex; gap:6px; align-items:center; padding:8px 12px; border-radius:999px;
+      display:inline-flex; gap:8px; align-items:center; padding:10px 12px; border-radius:999px;
       background:#0b1220; border:1px solid var(--ring); color:#cbd5e1; font-size:13px;
     }
-    .spinner{ width:18px; height:18px; border:3px solid #ffffff22; border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite }
-    @keyframes spin { to { transform: rotate(360deg)} }
-    a{ color:#93c5fd; text-decoration:none }
+    .spinner{ width:16px; height:16px; border:3px solid #ffffff22; border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite }
+    @keyframes spin { to { transform:rotate(360deg) } }
+
+    .grid-days{
+      display:grid; gap:10px; margin-top:10px;
+      grid-template-columns: repeat(3, minmax(160px, 1fr));
+    }
+    .day{
+      background:#0b1220; border:1px solid var(--ring); border-radius:14px; padding:12px;
+      display:flex; flex-direction:column; gap:6px;
+    }
+    .day h4{ margin:0; font-size:16px }
+    .day .temps{ display:flex; gap:8px; align-items:baseline }
+    .day .max{ font-size:22px; font-weight:800 }
+    .day .min{ color:#93c5fd }
+
+    .map-wrap{ height:260px; border-radius:16px; overflow:hidden; border:1px solid var(--ring) }
+
+    .footer{ grid-column:1 / -1; text-align:center; color:var(--muted); font-size:12px; }
+
+    @media (max-width: 960px){
+      .container{ grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <div class="hero">
-      <div class="badge"><span class="spinner"></span> พร้อมแสดงสภาพอากาศจากตำแหน่ง IP ของคุณ</div>
+  <div class="container">
+    <header class="header">
+      <div class="badge"><span class="spinner"></span> โหลดอัตโนมัติจากตำแหน่ง IP ของคุณ</div>
       <h1 class="title">BlueAom Weather</h1>
-      <p class="subtitle">ข้อมูลอากาศจาก Open-Meteo • ระบุตำแหน่งด้วย ipapi.co (ไม่ต้องอนุญาตตำแหน่ง)</p>
-    </div>
+      <p class="subtitle">ข้อมูลอากาศจาก <a href="https://open-meteo.com" target="_blank">Open-Meteo</a> •
+        ระบุตำแหน่งด้วย <a href="https://ipapi.co" target="_blank">ipapi.co</a> — ไม่ต้องอนุญาต GPS</p>
+    </header>
 
-    <div class="card" id="card">
-      <div class="row" style="margin-bottom:18px;">
-        <button class="btn" id="btnNow">ดูสภาพอากาศตอนนี้</button>
-        <button class="btn secondary" id="btnLatest">อ่านล่าสุดจากฐานข้อมูล</button>
-      </div>
-
-      <div id="loading" class="row muted" style="display:none; gap:10px;">
-        <span class="spinner"></span><span id="loadingText"> กำลังดึงข้อมูล…</span>
-      </div>
-
-      <div id="content" style="display:none;">
-        <div class="row" style="justify-content:space-between; align-items:flex-end;">
-          <div>
-            <div id="loc" style="font-weight:700; font-size:20px;"></div>
-            <div class="muted" id="time"></div>
-          </div>
-          <div class="right">
-            <div class="big" id="temp">--°C</div>
-            <div class="muted" id="coord"></div>
-          </div>
+    <!-- ซ้าย: สภาพอากาศปัจจุบัน + ย้อนหลัง 5 วัน -->
+    <section class="card">
+      <div class="row" style="align-items:flex-end">
+        <div>
+          <div id="loc" style="font-weight:700; font-size:20px">กำลังระบุตำแหน่ง…</div>
+          <div class="muted" id="time">—</div>
+          <div class="muted" id="coord"></div>
         </div>
-
-        <div class="grid">
-          <div class="pill">🌬️ ลม <strong id="wind">-</strong> m/s</div>
+        <div class="right">
+          <div class="big" id="temp">--°C</div>
           <div class="pill">💧 ความชื้น <strong id="humi">-</strong>%</div>
-          <div class="pill">☁️ เมฆฝน/เมฆรวม ดูเพิ่มได้จากชุดรายชั่วโมง</div>
+          <div class="pill">🌬️ ลม <strong id="wind">-</strong> m/s</div>
         </div>
       </div>
 
-      <div class="footer">
-        แหล่งระบุตำแหน่ง: <a href="https://ipapi.co" target="_blank" rel="noreferrer">ipapi.co</a> •
-        ข้อมูลอากาศ: <a href="https://open-meteo.com" target="_blank" rel="noreferrer">Open-Meteo</a>
-      </div>
-    </div>
+      <canvas id="chart" height="120" style="margin-top:12px"></canvas>
+
+      <h3 style="margin:14px 0 8px">ย้อนหลัง 5 วัน</h3>
+      <div id="days" class="grid-days"></div>
+    </section>
+
+    <!-- ขวา: แผนที่ -->
+    <aside class="card">
+      <h3 style="margin:0 0 10px">ตำแหน่งของคุณ</h3>
+      <div class="map-wrap"><div id="map" style="height:100%"></div></div>
+      <p class="muted" style="margin-top:10px">แผนที่โดย OpenStreetMap / Leaflet</p>
+    </aside>
+
+    <footer class="footer">
+      © <span id="year"></span> BlueAom Weather • Sources:
+      <a href="https://ipapi.co" target="_blank">ipapi.co</a> &amp; <a href="https://open-meteo.com" target="_blank">Open-Meteo</a>
+    </footer>
   </div>
+
   <script src="main.js"></script>
 </body>
 </html>

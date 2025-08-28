@@ -1,148 +1,124 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import fetch from "node-fetch";
 import { MongoClient } from "mongodb";
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-// ให้ Express เชื่อ proxy เพื่ออ่าน IP จาก x-forwarded-for ได้
-app.set("trust proxy", true);
-
-// เสิร์ฟไฟล์ static
 app.use(cors());
-app.use(express.static("public"));
+app.use(express.json());
+app.set("trust proxy", true); // สำคัญบน Render/Proxy เพื่ออ่าน IP จริงจาก X-Forwarded-For
 
-// ==== (ตัวเลือก) MongoDB ====
-let mongoClient = null;
-let mongoCol = null;
+const PORT = process.env.PORT || 3000;
+const MONGODB_URI = process.env.MONGODB_URI || "";
+const MONGODB_DB = process.env.MONGODB_DB || "weather";
+let mongo = null;
+let logsCol = null;
 
-async function initMongo() {
-  const uri = process.env.MONGODB_URI;
-  const dbName = process.env.MONGODB_DB || "weather";
-  if (!uri) return; // ไม่ตั้งค่า = ไม่ใช้ Mongo ก็ได้
-
-  mongoClient = new MongoClient(uri);
-  await mongoClient.connect();
-  mongoCol = mongoClient.db(dbName).collection("observations");
-  console.log("✅ Connected MongoDB");
-}
-initMongo().catch(e => console.error("Mongo init error:", e.message));
-
-// ==== Utilities ====
-function getClientIp(req) {
-  // priority: x-forwarded-for (หลัง proxy) -> socket.remoteAddress
-  const xf = req.headers["x-forwarded-for"];
-  const ip = Array.isArray(xf) ? xf[0] : (xf || req.socket.remoteAddress || "");
-  return ip.split(",")[0].trim().replace("::ffff:", "");
-}
-
-async function geoFromIp(ip) {
-  // ระบุตำแหน่งจาก IP: ipapi.co (ฟรี/ไม่ต้อง API key)
+// ต่อ MongoDB เฉพาะเมื่อมี URI (ถ้าใช้ Render + MongoDB Atlas ค่อยใส่ .env ในแดชบอร์ด)
+if (MONGODB_URI) {
   try {
-    const url = ip ? `https://ipapi.co/${ip}/json/` : `https://ipapi.co/json/`;
-    const r = await fetch(url, { headers: { Accept: "application/json" } });
-    if (!r.ok) throw new Error(`ipapi ${r.status}`);
-    const j = await r.json();
-    const lat = Number(j.latitude);
-    const lon = Number(j.longitude);
-    const city = j.city || j.region || j.country_name || "ตำแหน่งปัจจุบัน";
-    if (!lat || !lon) throw new Error("no lat/lon");
-    return { lat, lon, city };
-  } catch {
-    // fallback กรุงเทพฯ
-    return { lat: 13.7563, lon: 100.5018, city: "Bangkok (fallback)" };
+    mongo = new MongoClient(MONGODB_URI);
+    await mongo.connect();
+    const db = mongo.db(MONGODB_DB);
+    logsCol = db.collection("weather_logs");
+    console.log("[mongo] connected");
+  } catch (e) {
+    console.error("[mongo] connect error:", e.message);
   }
 }
 
-async function fetchOpenMeteo(lat, lon) {
-  const url =
-    `https://api.open-meteo.com/v1/forecast` +
-    `?latitude=${lat}&longitude=${lon}` +
-    `&timezone=Asia%2FBangkok` +
-    `&current=temperature_2m,wind_speed_10m,relative_humidity_2m` +
-    `&hourly=temperature_2m,relative_humidity_2m,precipitation,cloud_cover`;
-
-  const r = await fetch(url, { cache: "no-store" });
-  if (!r.ok) throw new Error(`Open-Meteo error: ${r.status}`);
-  return r.json();
+// ดึง IP ลูกค้าแบบปลอดภัย
+function getClientIp(req) {
+  // x-forwarded-for อาจเป็น "ip1, ip2, ip3"
+  const xff = req.headers["x-forwarded-for"];
+  if (typeof xff === "string" && xff.length > 0) {
+    return xff.split(",")[0].trim();
+  }
+  // req.ip อาจเป็น "::ffff:1.2.3.4"
+  return (req.ip || "").replace("::ffff:", "");
 }
 
-// ==== API ====
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, time: new Date().toISOString() });
+});
 
-/**
- * แบบเดิม: ระบุพิกัดเองผ่าน query (ยังใช้งานได้)
- * /api/weather?lat=..&lon=..&city=..
- */
 app.get("/api/weather", async (req, res) => {
   try {
-    const lat = Number(req.query.lat ?? 13.7563);
-    const lon = Number(req.query.lon ?? 100.5018);
-    const city = String(req.query.city ?? "Bangkok");
+    const clientIp = getClientIp(req);
+    // ถ้าได้ IP จริง ใช้ /<ip>/json, ถ้าไม่มีก็ใช้ /json (จะเป็น IP ของเซิร์ฟเวอร์)
+    const ipapiUrl = clientIp
+      ? `https://ipapi.co/${clientIp}/json/`
+      : "https://ipapi.co/json/";
 
-    const data = await fetchOpenMeteo(lat, lon);
+    const ipResp = await fetch(ipapiUrl, { headers: { "user-agent": "blueaomweather" }});
+    const ipData = await ipResp.json();
 
-    const doc = {
-      location: { name: city, lat, lon },
-      fetchedAt: new Date(),
-      current: data.current,
-      hourly: data.hourly,
-      raw: data,
+    const lat = Number(ipData.latitude) || 13.736;  // default Bangkok
+    const lon = Number(ipData.longitude) || 100.523;
+    const loc = {
+      ip: clientIp || ipData.ip || null,
+      city: ipData.city || null,
+      region: ipData.region || ipData.region_code || null,
+      country: ipData.country_name || ipData.country || null,
+      lat,
+      lon
     };
 
-    if (mongoCol) await mongoCol.insertOne(doc);
-    res.json(doc);
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
+    // เรียก Open-Meteo: current + daily ย้อนหลัง 5 วัน (รวมวันนี้)
+    const params = new URLSearchParams({
+      latitude: lat.toString(),
+      longitude: lon.toString(),
+      timezone: "auto",
+      current: "temperature_2m,relative_humidity_2m,wind_speed_10m",
+      daily: "temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max",
+      past_days: "5",
+      forecast_days: "1"
+    });
 
-/**
- * ใหม่: ใช้ IP ผู้ใช้ → หา lat/lon → เรียก Open-Meteo
- * ไม่ต้องขอสิทธิ์ตำแหน่งจากเบราว์เซอร์
- */
-app.get("/api/weather/by-ip", async (req, res) => {
-  try {
-    const ip = getClientIp(req);
-    const { lat, lon, city } = await geoFromIp(ip);
-    const data = await fetchOpenMeteo(lat, lon);
+    const omUrl = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
+    const omResp = await fetch(omUrl);
+    if (!omResp.ok) throw new Error(`Open-Meteo HTTP ${omResp.status}`);
+    const omData = await omResp.json();
 
-    const doc = {
-      location: { name: city, lat, lon },
-      fetchedAt: new Date(),
-      current: data.current,
-      hourly: data.hourly,
-      raw: data,
+    const payload = {
+      fetchedAt: new Date().toISOString(),
+      location: loc,
+      sources: {
+        geolocation: ipapiUrl,
+        weather: omUrl
+      },
+      current: omData.current || null,
+      daily: omData.daily || null,
+      units: {
+        current: omData.current_units || null,
+        daily: omData.daily_units || null
+      }
     };
 
-    if (mongoCol) await mongoCol.insertOne(doc);
-    res.json(doc);
+    // บันทึก log ลง Mongo (ถ้ามี)
+    if (logsCol) {
+      try { await logsCol.insertOne(payload); } catch (e) { /* ignore */ }
+    }
+
+    res.json(payload);
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ ok: false, error: e.message });
+    console.error("[/api/weather] error:", e);
+    res.status(500).json({ error: "failed_to_fetch_weather", message: e.message });
   }
 });
 
-/**
- * อ่านเอกสารล่าสุดจาก MongoDB (ถ้าเปิดใช้)
- */
-app.get("/api/latest", async (req, res) => {
-  try {
-    if (!mongoCol) return res.json(null);
-    const latest = await mongoCol.find().sort({ fetchedAt: -1 }).limit(1).toArray();
-    res.json(latest[0] ?? null);
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
+// อ่านรายการล่าสุดจาก Mongo (ถ้ามี)
+app.get("/api/latest", async (_req, res) => {
+  if (!logsCol) return res.json({ ok: true, data: null, note: "no_database_connected" });
+  const doc = await logsCol.find().sort({ _id: -1 }).limit(1).toArray();
+  res.json({ ok: true, data: doc[0] || null });
 });
 
-// ==== Start server ====
+// เสิร์ฟไฟล์หน้าเว็บ
+app.use(express.static("public"));
+
 app.listen(PORT, () => {
-  console.log(`🚀 Server on http://localhost:${PORT}`);
-  console.log(`   Static  -> http://localhost:${PORT}/`);
-  console.log(`   By IP   -> http://localhost:${PORT}/api/weather/by-ip`);
+  console.log(`BlueAom Weather running on port ${PORT}`);
 });
