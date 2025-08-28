@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BlueAom Weather</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#0f172a;        /* slate-900 */
+      --card:#111827ee;    /* gray-900 with alpha */
+      --muted:#94a3b8;     /* slate-400 */
+      --accent:#60a5fa;    /* blue-400 */
+      --accent2:#22d3ee;   /* cyan-400 */
+      --ring:#1f2937;      /* gray-800 */
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; min-height:100vh; color:#e5e7eb;
+      font-family:Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: radial-gradient(1200px 600px at 20% -10%, #0ea5e9 0%, transparent 60%),
+                  radial-gradient(1000px 600px at 110% 10%, #6366f1 0%, transparent 60%),
+                  var(--bg);
+      display:flex; align-items:center; justify-content:center; padding:24px;
+    }
+    .shell{ width:100%; max-width:920px; }
+    .hero{ text-align:center; margin-bottom:24px; }
+    .title{
+      font-weight:800; font-size:clamp(28px, 4vw, 42px); letter-spacing:.3px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      -webkit-background-clip:text; background-clip:text; color:transparent;
+      text-shadow: 0 6px 30px rgba(59,130,246,.25);
+    }
+    .subtitle{ color:var(--muted); margin-top:8px }
+    .card{
+      background: linear-gradient(180deg, rgba(17,24,39,.95), rgba(15,23,42,.92));
+      border:1px solid var(--ring);
+      border-radius:24px; padding:24px; box-shadow: 0 20px 60px rgba(2,6,23,.6);
+      backdrop-filter: blur(6px);
+    }
+    .row{ display:flex; gap:16px; align-items:center; justify-content:center; flex-wrap:wrap }
+    .btn{
+      border:0; border-radius:14px; padding:12px 18px; font-weight:600; cursor:pointer;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+      color:#0b1324; box-shadow:0 8px 30px rgba(56,189,248,.35);
+      transition: transform .08s ease, filter .2s ease;
+    }
+    .btn:active{ transform: translateY(1px) }
+    .btn.secondary{
+      background:transparent; color:#e5e7eb; border:1px solid var(--ring);
+      box-shadow:none;
+    }
+    .grid{ display:grid; grid-template-columns: repeat(3, minmax(120px,1fr)); gap:12px; margin-top:14px }
+    .pill{
+      background:#0b1220; border:1px solid var(--ring); border-radius:14px; padding:12px 14px;
+      display:flex; align-items:center; gap:8px; color:#d1d5db;
+    }
+    .big{ font-size:56px; font-weight:800; line-height:1 }
+    .muted{ color:var(--muted) }
+    .right{ text-align:right }
+    .footer{ margin-top:14px; text-align:center; color:var(--muted); font-size:12px }
+    .badge{
+      display:inline-flex; gap:6px; align-items:center; padding:8px 12px; border-radius:999px;
+      background:#0b1220; border:1px solid var(--ring); color:#cbd5e1; font-size:13px;
+    }
+    .spinner{ width:18px; height:18px; border:3px solid #ffffff22; border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite }
+    @keyframes spin { to { transform: rotate(360deg)} }
+    a{ color:#93c5fd; text-decoration:none }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="hero">
+      <div class="badge"><span class="spinner"></span> พร้อมแสดงสภาพอากาศจากตำแหน่ง IP ของคุณ</div>
+      <h1 class="title">BlueAom Weather</h1>
+      <p class="subtitle">ข้อมูลอากาศจาก Open-Meteo • ระบุตำแหน่งด้วย ipapi.co (ไม่ต้องอนุญาตตำแหน่ง)</p>
+    </div>
+
+    <div class="card" id="card">
+      <div class="row" style="margin-bottom:18px;">
+        <button class="btn" id="btnNow">ดูสภาพอากาศตอนนี้</button>
+        <button class="btn secondary" id="btnLatest">อ่านล่าสุดจากฐานข้อมูล</button>
+      </div>
+
+      <div id="loading" class="row muted" style="display:none; gap:10px;">
+        <span class="spinner"></span><span id="loadingText"> กำลังดึงข้อมูล…</span>
+      </div>
+
+      <div id="content" style="display:none;">
+        <div class="row" style="justify-content:space-between; align-items:flex-end;">
+          <div>
+            <div id="loc" style="font-weight:700; font-size:20px;"></div>
+            <div class="muted" id="time"></div>
+          </div>
+          <div class="right">
+            <div class="big" id="temp">--°C</div>
+            <div class="muted" id="coord"></div>
+          </div>
+        </div>
+
+        <div class="grid">
+          <div class="pill">🌬️ ลม <strong id="wind">-</strong> m/s</div>
+          <div class="pill">💧 ความชื้น <strong id="humi">-</strong>%</div>
+          <div class="pill">☁️ เมฆฝน/เมฆรวม ดูเพิ่มได้จากชุดรายชั่วโมง</div>
+        </div>
+      </div>
+
+      <div class="footer">
+        แหล่งระบุตำแหน่ง: <a href="https://ipapi.co" target="_blank" rel="noreferrer">ipapi.co</a> •
+        ข้อมูลอากาศ: <a href="https://open-meteo.com" target="_blank" rel="noreferrer">Open-Meteo</a>
+      </div>
+    </div>
+  </div>
+  <script src="main.js"></script>
+</body>
+</html>
