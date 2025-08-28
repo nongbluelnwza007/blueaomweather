@@ -4,10 +4,13 @@ $("year").textContent = new Date().getFullYear();
 
 let chart;
 
+document.addEventListener("DOMContentLoaded", () => {
+  loadWeather();
+});
+
 async function loadWeather() {
   try {
-    const loadingText = "กำลังดึงข้อมูล…";
-    $("loc").textContent = loadingText;
+    $("loc").textContent = "กำลังดึงข้อมูล…";
     $("time").textContent = "";
     $("coord").textContent = "";
 
@@ -30,12 +33,9 @@ function renderNow(doc) {
   const d = doc.current || {};
   const loc = doc.location || {};
 
-  $("loc").textContent = [
-    loc.city, loc.region, loc.country
-  ].filter(Boolean).join(", ") || "Unknown location";
-
+  $("loc").textContent = [loc.city, loc.region, loc.country].filter(Boolean).join(", ") || "Unknown location";
   $("time").textContent = new Date(doc.fetchedAt).toLocaleString();
-  $("coord").textContent = loc.lat && loc.lon ? `(${loc.lat.toFixed(4)}, ${loc.lon.toFixed(4)})` : "";
+  $("coord").textContent = (loc.lat && loc.lon) ? `(${loc.lat.toFixed(4)}, ${loc.lon.toFixed(4)})` : "";
 
   $("temp").textContent = (d.temperature_2m ?? "--") + "°C";
   $("humi").textContent = d.relative_humidity_2m ?? "-";
@@ -49,13 +49,12 @@ function renderDaily(doc) {
   const daily = doc.daily || {};
   if (!daily.time) return;
 
-  // Open-Meteo (past_days=5 + forecast_days=1) จะได้ 6 วัน (ย้อนหลัง 5 + วันนี้)
-  // เราจะแสดงเฉพาะ 5 วันย้อนหลัง (ตัดวันสุดท้ายออก)
+  // Open-Meteo จะส่งมา 6 วัน (ย้อนหลัง 5 + วันนี้) → แสดงเฉพาะย้อนหลัง 5 วัน
   const times = daily.time.slice(0, -1);
-  const tmax = daily.temperature_2m_max?.slice(0, -1) || [];
-  const tmin = daily.temperature_2m_min?.slice(0, -1) || [];
-  const prcp = daily.precipitation_sum?.slice(0, -1) || [];
-  const wmax = daily.wind_speed_10m_max?.slice(0, -1) || [];
+  const tmax = (daily.temperature_2m_max || []).slice(0, -1);
+  const tmin = (daily.temperature_2m_min || []).slice(0, -1);
+  const prcp = (daily.precipitation_sum || []).slice(0, -1);
+  const wmax = (daily.wind_speed_10m_max || []).slice(0, -1);
 
   times.forEach((iso, i) => {
     const el = document.createElement("div");
@@ -77,9 +76,9 @@ function renderChart(doc) {
   const daily = doc.daily || {};
   if (!daily.time) return;
 
-  const labels = daily.time.slice(0, -1).map((iso) => fmtLabel(iso));
-  const tmax = daily.temperature_2m_max?.slice(0, -1) || [];
-  const tmin = daily.temperature_2m_min?.slice(0, -1) || [];
+  const labels = daily.time.slice(0, -1).map(fmtLabel);
+  const tmax = (daily.temperature_2m_max || []).slice(0, -1);
+  const tmin = (daily.temperature_2m_min || []).slice(0, -1);
 
   const ctx = document.getElementById("chart");
   if (chart) chart.destroy();
@@ -106,6 +105,11 @@ function renderChart(doc) {
 }
 
 function renderMap(doc) {
+  // ป้องกันเคสที่ Leaflet ยังไม่โหลด
+  if (typeof L === "undefined") {
+    console.error("Leaflet not loaded");
+    return;
+  }
   const loc = doc.location || {};
   const lat = loc.lat || 13.736;
   const lon = loc.lon || 100.523;
@@ -113,9 +117,12 @@ function renderMap(doc) {
   const map = L.map("map", { zoomControl: true }).setView([lat, lon], 11);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
-    attribution: "&copy; OpenStreetMap"
+    attribution: "&copy; OpenStreetMap contributors"
   }).addTo(map);
   L.marker([lat, lon]).addTo(map).bindPopup(`${loc.city || "ตำแหน่งของคุณ"}`);
+
+  // เผื่อ container render ช้า → บังคับคำนวณขนาดใหม่
+  setTimeout(() => map.invalidateSize(), 300);
 }
 
 function fmtNum(n) {
@@ -130,5 +137,3 @@ function fmtLabel(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString("th-TH", { day: "2-digit", month: "short" });
 }
-
-document.addEventListener("DOMContentLoaded", loadWeather);
